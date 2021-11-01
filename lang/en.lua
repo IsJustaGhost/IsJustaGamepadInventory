@@ -1,7 +1,10 @@
 ------------------------------------------------
 -- English localization for IsJustaGamepadInventory
 ------------------------------------------------
+
 local strings = {
+	SI_IJA_GPINVENTORY_SURVEYS_MAPS					= zo_strformat(SI_ADDON_MANAGER_STATE_STRING, GetString(SI_SPECIALIZEDITEMTYPE100), GetString(SI_SPECIALIZEDITEMTYPE101)),
+
 	SI_IJA_GPINVENTORY_CATEGORIES					= "Category and filter options",
 
 	SI_IJA_GPINVENTORY_CATEGORY_MAPS				= "Use Map Category",
@@ -21,7 +24,7 @@ local strings = {
 
 	SI_IJA_GPINVENTORY_SORTBANK_WITHDRAW			= "Bank Withdraw",
 	SI_IJA_GPINVENTORY_SORTBANK_WITHDRAW_TOOLTIP	= "Enabled: Sorts junk in bank withdraw list to bottom.",
-	
+
 	SI_IJA_GPINVENTORY_SORTBANK_DEPOSIT				= "Bank Deposit",
 	SI_IJA_GPINVENTORY_SORTBANK_DEPOSIT_TOOLTIP		= "Enabled: Sorts junk in bank and guild bank deposit lists to bottom."
 }
