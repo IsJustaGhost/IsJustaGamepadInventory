@@ -3,8 +3,6 @@
 ------------------------------------------------
 
 local strings = {
-	SI_IJA_GPINVENTORY_SURVEYS_MAPS					= zo_strformat(SI_ADDON_MANAGER_STATE_STRING, GetString(SI_SPECIALIZEDITEMTYPE100), GetString(SI_SPECIALIZEDITEMTYPE101)),
-
 	SI_IJA_GPINVENTORY_CATEGORIES					= "Category and filter options",
 
 	SI_IJA_GPINVENTORY_CATEGORY_MAPS				= "Use Map Category",
@@ -26,14 +24,17 @@ local strings = {
 	SI_IJA_GPINVENTORY_SORTBANK_WITHDRAW_TOOLTIP	= "Enabled: Sorts junk in bank withdraw list to bottom.",
 
 	SI_IJA_GPINVENTORY_SORTBANK_DEPOSIT				= "Bank Deposit",
-	SI_IJA_GPINVENTORY_SORTBANK_DEPOSIT_TOOLTIP		= "Enabled: Sorts junk in bank and guild bank deposit lists to bottom."
+	SI_IJA_GPINVENTORY_SORTBANK_DEPOSIT_TOOLTIP		= "Enabled: sorts junk in bank and guild bank deposit lists to bottom."
 }
 
 
 ITEMFILTERTYPE_STOLEN = ITEMFILTERTYPE_ITERATION_END + 1
 ITEMFILTERTYPE_MAPS = ITEMFILTERTYPE_STOLEN + 1
-strings["SI_ITEMFILTERTYPE" .. ITEMFILTERTYPE_STOLEN] = "Stolen"
-strings["SI_ITEMFILTERTYPE" .. ITEMFILTERTYPE_MAPS] = "Surveys/Maps"
+strings["SI_ITEMFILTERTYPE" .. ITEMFILTERTYPE_STOLEN] = GetString(SI_GAMEPAD_ITEM_STOLEN_LABEL)
+--strings["SI_ITEMFILTERTYPE" .. ITEMFILTERTYPE_MAPS] = "Surveys/Maps"
+strings["SI_ITEMFILTERTYPE" .. ITEMFILTERTYPE_MAPS] = zo_strformat(SI_UNIT_FRAME_BARVALUE, GetString(SI_SPECIALIZEDITEMTYPE100), GetString(SI_SPECIALIZEDITEMTYPE101))
+
+strings["SI_IJA_GPINVENTORY_SURVEYS_MAPS"] = zo_strformat(SI_ADDON_MANAGER_STATE_STRING, GetString(SI_SPECIALIZEDITEMTYPE100), GetString(SI_SPECIALIZEDITEMTYPE101))
 
 for stringId, stringValue in pairs(strings) do
 	ZO_CreateStringId(stringId, stringValue)
