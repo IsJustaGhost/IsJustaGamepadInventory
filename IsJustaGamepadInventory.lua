@@ -215,32 +215,60 @@ local function isItemMap(itemData)
 	return specialized_itemtype_map_survey_report[itemData.specializedItemType] or false
 end
 
-
-
-
 local function filterDisabled(itemData)
 	if itemData.isJunk then
-		if IJA_GPINVENTORY.sv.filterJunk then
+		if savedVars.filterJunk then
 			return false
 		else
 			return true
 		end
 	end
 	if itemData.stolen then
-		if IJA_GPINVENTORY.sv.filterStolen then
+		if savedVars.filterStolen then
 			return false
 		else
 			return true
 		end
 	end
 	if isItemMap(itemData) then
-		if IJA_GPINVENTORY.sv.filterMaps then
+		if savedVars.filterMaps then
 			return false
 		else
 			return true
 		end
 	end
 end
+
+local shouldAddItem = {
+	[ITEMFILTERTYPE_ALL] = function(itemData)
+		if itemData.stolen or itemData.isJunk or isItemMap(itemData) then
+			return filterDisabled(itemData)
+		else
+			return true
+		end
+	end,
+	[ITEMFILTERTYPE_MAPS] = function(itemData)
+		if isItemMap(itemData) then
+			if itemData.isJunk or itemData.stolen then
+				return filterDisabled(itemData)
+			end
+			return true
+		end
+	end,
+	[ITEMFILTERTYPE_JUNK] = function(itemData)
+		if itemData.isJunk then
+			if itemData.stolen then
+				return filterDisabled(itemData)
+			end
+			return true
+		end
+	end,
+	[ITEMFILTERTYPE_STOLEN] = function(itemData)
+		return itemData.stolen
+	end
+}
+
+
 
 local function IsStolenItem(itemData)
 	local isStolen = itemData.stolen
@@ -278,18 +306,6 @@ local function areAnyItemsNew(filterType)
 	for slotId, slotData in pairs(bagCache) do
 		if slotData.brandNew then
 			return true
-		end
-	end
-end
-
-
-local function shouldShowNewSupplies()
-	local bagCache = SHARED_INVENTORY:GenerateFullSlotData(nil, BAG_BACKPACK)
-	for slotId, itemData in pairs(bagCache) do
-		if itemData.brandNew and ZO_InventoryUtils_DoesNewItemMatchSupplies(itemData) then
-			if not (itemData.isJunk or itemData.stolen) then
-				return true	
-			end
 		end
 	end
 end
@@ -443,13 +459,10 @@ local function GetBestItemCategoryDescription(itemData)
 		return zo_strformat(SI_INVENTORY_HEADER, GetString(SI_ITEMFILTERTYPE9))
 	end
 	
-	if itemData.specializedItemType == 100 then
-		return zo_strformat(SI_INVENTORY_HEADER, GetString(SI_SPECIALIZEDITEMTYPE100))
+	if isItemMap(itemData) then
+		return zo_strformat(SI_INVENTORY_HEADER, GetString("SI_SPECIALIZEDITEMTYPE", itemData.specializedItemType))
 	end
-	if itemData.specializedItemType == 101 then
-		return zo_strformat(SI_INVENTORY_HEADER, GetString(SI_SPECIALIZEDITEMTYPE101))
-	end
-	
+
 	if itemData.itemType == ITEMTYPE_FURNISHING then
 		local furnitureDataId = GetItemFurnitureDataId(itemData.bagId, itemData.slotIndex)
 		if furnitureDataId ~= 0 then
@@ -558,10 +571,34 @@ local function GetItemDataFilterComparator(filteredEquipSlot, nonEquipableFilter
 		end
 
 		if nonEquipableFilterType then
-			return ZO_InventoryUtils_DoesNewItemMatchFilterType(itemData, nonEquipableFilterType)
+			local filterType = GetItemFilterTypeInfo(itemData.bagId, itemData.slotIndex)
+			local currentFilter = isCutomCategory[nonEquipableFilterType] and filterType or nonEquipableFilterType
+
+			return ZO_InventoryUtils_DoesNewItemMatchFilterType(itemData, currentFilter)
 		end
 		
 		return ZO_InventoryUtils_DoesNewItemMatchSupplies(itemData)
+	end
+end
+
+local original_GetItemDataFilterComparator = GAMEPAD_INVENTORY.GetItemDataFilterComparator
+function GAMEPAD_INVENTORY:GetItemDataFilterComparator(filteredEquipSlot, nonEquipableFilterType)
+	local function doesItemPassFilter(itemData, currentFilter)
+		-- get original or libFilters filter
+		local comparator = original_GetItemDataFilterComparator(GAMEPAD_INVENTORY, filteredEquipSlot, currentFilter)
+		local result = comparator(itemData)
+		
+		if result then
+			return ZO_InventoryUtils_DoesNewItemMatchFilterType(itemData, currentFilter)
+		end
+		return false
+	end
+
+	return function(itemData)
+		local filterType = GetItemFilterTypeInfo(itemData.bagId, itemData.slotIndex)
+		local currentFilter = isCutomCategory[nonEquipableFilterType] and filterType or nonEquipableFilterType
+		
+		return doesItemPassFilter(itemData, currentFilter)
 	end
 end
 
@@ -577,46 +614,59 @@ local function UpdateGold(control)
 	ZO_CurrencyControl_SetSimpleCurrency(control, CURT_MONEY, GetCurrencyAmount(CURT_MONEY, CURRENCY_LOCATION_CHARACTER), ZO_GAMEPAD_CURRENCY_OPTIONS_LONG_FORMAT)
 	return true
 end
+
 local function UpdateCapacityString()
 	return zo_strformat(SI_GAMEPAD_INVENTORY_CAPACITY_FORMAT, GetNumBagUsedSlots(BAG_BACKPACK), GetBagSize(BAG_BACKPACK))
 end
+
 local function UpdateSellValueString(control)
+	local filterType = GAMEPAD_INVENTORY.categoryList:GetTargetData().filterType
 	local comparetor = function(itemData)
-		return (IJA_GPINVENTORY.showJunk and itemData.isJunk) or (IJA_GPINVENTORY.showStolen and itemData.stolen)
+		return (filterType == ITEMFILTERTYPE_JUNK and itemData.isJunk) or
+			(filterType == ITEMFILTERTYPE_STOLEN and itemData.stolen)
 	end
 	
 	local bagCache = SHARED_INVENTORY:GenerateFullSlotData(comparetor, BAG_BACKPACK)
 	
 	local total = 0
-	local test = 1
 	for slotId, itemData in pairs(bagCache) do
 		total = total + itemData.stackSellPrice
 	end
 	return zo_strformat(SI_TOOLTIP_ITEM_VALUE_FORMAT, total, GetString(SI_GAMEPAD_INVENTORY_AVAILABLE_FUNDS))
 end
-local function updateDynamicMapsHeader()
-	local isSurvey = function(itemData) return itemData.specializedItemType == 101 end
-	local isMap = function(itemData) return itemData.specializedItemType == 100 end
-	
-	local surveyCache = SHARED_INVENTORY:GenerateFullSlotData(isSurvey, BAG_BACKPACK)
-	local mapCache = SHARED_INVENTORY:GenerateFullSlotData(isMap, BAG_BACKPACK)
+
+local function dynamicMapHeaders_Clear()
+	if GAMEPAD_INVENTORY.mapsHeaderData.data3HeaderText then GAMEPAD_INVENTORY.mapsHeaderData.data3HeaderText = nil end
+	if GAMEPAD_INVENTORY.mapsHeaderData.data3Text then GAMEPAD_INVENTORY.mapsHeaderData.data3Text = nil end
+	if GAMEPAD_INVENTORY.mapsHeaderData.data4HeaderText then GAMEPAD_INVENTORY.mapsHeaderData.data4HeaderText = nil end
+	if GAMEPAD_INVENTORY.mapsHeaderData.data4Text then GAMEPAD_INVENTORY.mapsHeaderData.data4Text = nil end
+end
+local function dynamicMapHeaders_Set(surveyCache, mapCache)
+	local mapString		= zo_strformat(SI_INVENTORY_HEADER, GetString(SI_SPECIALIZEDITEMTYPE100))
+	local surveyString	= zo_strformat(SI_INVENTORY_HEADER, GetString(SI_SPECIALIZEDITEMTYPE101))
 
 	if #surveyCache > 0 then
-		GAMEPAD_INVENTORY.mapsHeaderData.data3HeaderText = zo_strformat(SI_INVENTORY_HEADER, "Resource Surveys")
+		GAMEPAD_INVENTORY.mapsHeaderData.data3HeaderText = zo_strformat(SI_INVENTORY_HEADER, surveyString)
 		GAMEPAD_INVENTORY.mapsHeaderData.data3Text = zo_strformat(SI_TOOLTIP_ITEM_VALUE_FORMAT, #surveyCache, "")
+	elseif #mapCache > 0 then
+		GAMEPAD_INVENTORY.mapsHeaderData.data3HeaderText = zo_strformat(SI_INVENTORY_HEADER, mapString)
+		GAMEPAD_INVENTORY.mapsHeaderData.data3Text = zo_strformat(SI_TOOLTIP_ITEM_VALUE_FORMAT, #mapCache, "")
+		return
 	end
-
 	if #mapCache > 0 then
-		if #surveyCache > 0 then
-			GAMEPAD_INVENTORY.mapsHeaderData.data4HeaderText = zo_strformat(SI_INVENTORY_HEADER, "Treasure Maps")
-			GAMEPAD_INVENTORY.mapsHeaderData.data4Text = zo_strformat(SI_TOOLTIP_ITEM_VALUE_FORMAT, #mapCache, "")
-		else
-			if GAMEPAD_INVENTORY.mapsHeaderData.data4HeaderText then GAMEPAD_INVENTORY.mapsHeaderData.data4HeaderText = nil end
-			if GAMEPAD_INVENTORY.mapsHeaderData.data4Text then GAMEPAD_INVENTORY.mapsHeaderData.data4Text = nil end
-			GAMEPAD_INVENTORY.mapsHeaderData.data3HeaderText = zo_strformat(SI_INVENTORY_HEADER, "Treasure Maps")
-			GAMEPAD_INVENTORY.mapsHeaderData.data3Text = zo_strformat(SI_TOOLTIP_ITEM_VALUE_FORMAT, #mapCache, "")
-		end
+		GAMEPAD_INVENTORY.mapsHeaderData.data4HeaderText = zo_strformat(SI_INVENTORY_HEADER, mapString)
+		GAMEPAD_INVENTORY.mapsHeaderData.data4Text = zo_strformat(SI_TOOLTIP_ITEM_VALUE_FORMAT, #mapCache, "")
 	end
+end
+local function dynamicMapHeaders_Update()
+	local isMap		= function(itemData) return itemData.specializedItemType == SPECIALIZED_ITEMTYPE_TROPHY_TREASURE_MAP end
+	local isSurvey	= function(itemData) return itemData.specializedItemType == SPECIALIZED_ITEMTYPE_TROPHY_SURVEY_REPORT end
+	
+	local surveyCache	= SHARED_INVENTORY:GenerateFullSlotData(isSurvey, BAG_BACKPACK)
+	local mapCache		= SHARED_INVENTORY:GenerateFullSlotData(isMap, BAG_BACKPACK)
+
+	dynamicMapHeaders_Clear()
+	dynamicMapHeaders_Set(surveyCache, mapCache)
 end
 
 ZO_PreHook(GAMEPAD_INVENTORY, "InitializeHeader", function(self)
@@ -645,26 +695,23 @@ end)
 
 ZO_PreHook(GAMEPAD_INVENTORY, "RefreshHeader", function(self, blockCallback)
 	if self.currentListType == "categoryList" then return false end
+
+	local filterType = GAMEPAD_INVENTORY.categoryList:GetTargetData().filterType
 	local headerData
 	
-	IJA_GPINVENTORY.showJunk = false
-	IJA_GPINVENTORY.showStolen = false
-	
-	
-	if self.categoryList:GetTargetData().showJunk and self:GetCurrentList():IsActive() then
+	if filterType == ITEMFILTERTYPE_JUNK and self:GetCurrentList():IsActive() then
 		IJA_GPINVENTORY.showJunk = true
 		self.customHeaderData.titleText = GetString(SI_ITEMFILTERTYPE9)
 		headerData = self.customHeaderData
-	elseif self.categoryList:GetTargetData().showStolen then
-		IJA_GPINVENTORY.showStolen = true
+	elseif filterType == ITEMFILTERTYPE_STOLEN then
 		self.customHeaderData.titleText = GetString(SI_GAMEPAD_ITEM_STOLEN_LABEL)
 		headerData = self.customHeaderData
-	elseif self.categoryList:GetTargetData().showMaps then
-		IJA_GPINVENTORY.showStolen = true
-		self.mapsHeaderData.titleText = GetString("Surveys and Maps")
-		updateDynamicMapsHeader()
+	elseif filterType == ITEMFILTERTYPE_MAPS then
+		self.mapsHeaderData.titleText = GetString(SI_IJA_GPINVENTORY_SURVEYS_MAPS)
+		dynamicMapHeaders_Update()
 		headerData = self.mapsHeaderData
 	else
+		-- if not custom category then run default RefreshHeader
 		return false
 	end
 	
@@ -677,7 +724,13 @@ end)
 ---------------------------------------------------------------------------------------------------------------
 ZO_PreHook(GAMEPAD_INVENTORY, "RefreshCategoryList", function(self)
 	self.categoryList:Clear()
-	 
+	
+	local function addFilteredBackpackCategory(filterType, icon)
+		if categoryNotEmpty(filterType)then 
+			self:AddFilteredBackpackCategoryIfPopulated(filterType, icon)
+		end
+	end
+
 	do -- Currencies
 		local name = GetString(SI_INVENTORY_CURRENCIES)
 		local iconFile = "EsoUI/Art/Inventory/Gamepad/gp_inventory_icon_currencies.dds"
@@ -692,33 +745,34 @@ ZO_PreHook(GAMEPAD_INVENTORY, "RefreshCategoryList", function(self)
 		if not isListEmpty then
 			local name = GetString(SI_INVENTORY_SUPPLIES)
 			local iconFile = "EsoUI/Art/Inventory/Gamepad/gp_inventory_icon_all.dds"
-	--		local hasAnyNewItems = SHARED_INVENTORY:AreAnyItemsNew(ZO_InventoryUtils_DoesNewItemMatchSupplies, nil, BAG_BACKPACK)
-			local data = ZO_GamepadEntryData:New(name, iconFile, nil, nil, shouldShowNewSupplies())
+			local hasAnyNewItems = SHARED_INVENTORY:AreAnyItemsNew(ZO_InventoryUtils_DoesNewItemMatchSupplies, nil, BAG_BACKPACK)
+			local data = ZO_GamepadEntryData:New(name, iconFile, nil, nil, hasAnyNewItems)
 			data:SetIconTintOnSelection(true)
 			self.categoryList:AddEntry("ZO_GamepadItemEntryTemplate", data)
 		end
 	end
 
 	-- Materials
-	if categoryNotEmpty(ITEMFILTERTYPE_CRAFTING)then 
-		self:AddFilteredBackpackCategoryIfPopulated(ITEMFILTERTYPE_CRAFTING, "EsoUI/Art/Inventory/Gamepad/gp_inventory_icon_materials.dds")
-	end
+	addFilteredBackpackCategory(ITEMFILTERTYPE_CRAFTING, "EsoUI/Art/Inventory/Gamepad/gp_inventory_icon_materials.dds")
 	-- Consumables
-	if categoryNotEmpty(ITEMFILTERTYPE_QUICKSLOT)then 
-		self:AddFilteredBackpackCategoryIfPopulated(ITEMFILTERTYPE_QUICKSLOT, "EsoUI/Art/Inventory/Gamepad/gp_inventory_icon_quickslot.dds")
-	end
+	addFilteredBackpackCategory(ITEMFILTERTYPE_QUICKSLOT, "EsoUI/Art/Inventory/Gamepad/gp_inventory_icon_quickslot.dds")
 	-- Furnishing
-	if categoryNotEmpty(ITEMFILTERTYPE_FURNISHING)then 
-		self:AddFilteredBackpackCategoryIfPopulated(ITEMFILTERTYPE_FURNISHING, "EsoUI/Art/Crafting/Gamepad/gp_crafting_menuIcon_furnishings.dds")
-	end
+	addFilteredBackpackCategory(ITEMFILTERTYPE_FURNISHING, "EsoUI/Art/Crafting/Gamepad/gp_crafting_menuIcon_furnishings.dds")
 	-- Companion Items
-	if categoryNotEmpty(ITEMFILTERTYPE_COMPANION)then 
-		self:AddFilteredBackpackCategoryIfPopulated(ITEMFILTERTYPE_COMPANION, "EsoUI/Art/Inventory/Gamepad/gp_inventory_icon_companionItems.dds")
-	end
+	addFilteredBackpackCategory(ITEMFILTERTYPE_COMPANION, "EsoUI/Art/Inventory/Gamepad/gp_inventory_icon_companionItems.dds")
 
 	do -- Quest Items
 		local questCache = SHARED_INVENTORY:GenerateFullQuestCache()
-		if next(questCache) then
+		local textSearchFilterdQuestCache = {}
+		for _, questItems in pairs(questCache) do
+			for _, questItem in pairs(questItems) do
+				if self:GetQuestItemDataFilterComparator(questItem.questItemId) then
+					table.insert(textSearchFilterdQuestCache, questCache)
+				end
+			end
+		end
+
+		if next(textSearchFilterdQuestCache) then
 			local name = GetString(SI_GAMEPAD_INVENTORY_QUEST_ITEMS)
 			local iconFile = "EsoUI/Art/Inventory/Gamepad/gp_inventory_icon_quest.dds"
 			local data = ZO_GamepadEntryData:New(name, iconFile)
@@ -727,11 +781,11 @@ ZO_PreHook(GAMEPAD_INVENTORY, "RefreshCategoryList", function(self)
 			self.categoryList:AddEntry("ZO_GamepadItemEntryTemplate", data)
 		end
 	end
-		
+
 	do	-- custom categories
 		for filterType, icon in pairs(customCategoies) do
 			if categoryNotEmpty(filterType) then
-				self:AddFilteredBackpackCategoryIfPopulated(filterType, icon)
+				addFilteredBackpackCategory(filterType, icon)
 			end
 		end
 	end
@@ -802,33 +856,6 @@ end)
 
 --[[
 
-local customCategoies = {
-	[ITEMFILTERTYPE_MAPS] = {
-		['icon'] = "/esoui/art/crafting/gamepad/gp_crafting_menuicon_designs.dds"
-	},
-	[ITEMFILTERTYPE_JUNK] = {
-		['icon'] = "/esoui/art/inventory/inventory_tabicon_junk_up.dds"
-	},
-	[ITEMFILTERTYPE_STOLEN] = {
-		['icon'] = "/esoui/art/inventory/gamepad/gp_inventory_icon_stolenitem.dds"
-	}
-}
-
-	for filterType, icon in pairs(customCategoies) do
-		if categoryNotEmpty(filterType) then
-			self:AddFilteredBackpackCategoryIfPopulated(filterType, icon)
-		end
-	end
-
-	do	-- custom categories
-		for filterType, icon in pairs(customCategoies) do
-			if categoryNotEmpty(filterType) then
-				self:AddFilteredBackpackCategoryIfPopulated(filterType, icon)
-			end
-		end
-	end
-		
-
 	do	-- custom categories
 		-- Treasure Maps and Survey Reports
 		if categoryNotEmpty(ITEMFILTERTYPE_MAPS) then
@@ -843,8 +870,11 @@ local customCategoies = {
 			self:AddFilteredBackpackCategoryIfPopulated(ITEMFILTERTYPE_STOLEN, "/esoui/art/inventory/gamepad/gp_inventory_icon_stolenitem.dds")
 		end
 	end
-		
-		
+
+	nonEquipableFilterType == ITEMFILTERTYPE_JUNK
+	nonEquipableFilterType == ITEMFILTERTYPE_STOLEN
+	nonEquipableFilterType == ITEMFILTERTYPE_MAPS
+
 ZO_PreHook(GAMEPAD_INVENTORY, "RefreshItemList", function(self)
 	self.itemList:Clear()
 	if self.categoryList:IsEmpty() then return end
@@ -852,14 +882,11 @@ ZO_PreHook(GAMEPAD_INVENTORY, "RefreshItemList", function(self)
 	local targetCategoryData 		= self.categoryList:GetTargetData()
 	local filteredEquipSlot 		= targetCategoryData.equipSlot
 	local nonEquipableFilterType 	= targetCategoryData.filterType
-	local showMapCategory 			= targetCategoryData.showMaps
-	local showJunkCategory 			= targetCategoryData.showJunk
-	local showStolenCategory 		= targetCategoryData.showStolen
-	local showBoPCategory 			= targetCategoryData.BoPAndTradeable
 
+	local listCategory = isCutomCategory[nonEquipableFilterType] and nonEquipableFilterType or ITEMFILTERTYPE_ALL
 	local filteredDataTable
 		
-		local isQuestItemFilter = nonEquipableFilterType == ITEMFILTERTYPE_QUEST
+	local isQuestItemFilter = nonEquipableFilterType == ITEMFILTERTYPE_QUEST
 	--special case for quest items
 	if isQuestItemFilter then
 		filteredDataTable = {}
@@ -872,19 +899,9 @@ ZO_PreHook(GAMEPAD_INVENTORY, "RefreshItemList", function(self)
 		end
 		table.sort(filteredDataTable, ZO_GamepadInventory_QuestItemSortComparator)
 	else
-		local comparator = GetItemDataFilterComparator(filteredEquipSlot, nonEquipableFilterType)
-		if showJunkCategory then
-			filteredDataTable = SHARED_INVENTORY:GenerateFullSlotData(IsJunkItem, BAG_BACKPACK, BAG_WORN)
-		elseif showStolenCategory then
-			filteredDataTable = SHARED_INVENTORY:GenerateFullSlotData(IsStolenItem, BAG_BACKPACK, BAG_WORN)
-		elseif showBoPCategory then
-			filteredDataTable = SHARED_INVENTORY:GenerateFullSlotData(isBoPCureentlyTradeable, BAG_BACKPACK, BAG_WORN)
-		elseif showMapCategory then
-			filteredDataTable = SHARED_INVENTORY:GenerateFullSlotData(IsMap, BAG_BACKPACK, BAG_WORN)
---				table.sort(filteredDataTable, function(data1, data2) return ZO_TableOrderingFunction(data1, data2, "specializedItemType", DEFAULT_SORT_KEYS, ZO_SORT_ORDER_UP)  end)
-		else
-			filteredDataTable = SHARED_INVENTORY:GenerateFullSlotData(comparator, BAG_BACKPACK, BAG_WORN)
-		end	
+		local comparator = self:GetItemDataFilterComparator(filteredEquipSlot, nonEquipableFilterType)
+		filteredDataTable = SHARED_INVENTORY:GenerateFullSlotData(comparator, BAG_BACKPACK, BAG_WORN)
+
 		for _, itemData in pairs(filteredDataTable) do
 			itemData.bestItemCategoryName = zo_strformat(SI_INVENTORY_HEADER, GetBestItemCategoryDescription(itemData))
 		end
@@ -906,6 +923,7 @@ ZO_PreHook(GAMEPAD_INVENTORY, "RefreshItemList", function(self)
 
 	for i, itemData in ipairs(filteredDataTable) do
 		local entryData = ZO_GamepadEntryData:New(itemData.name, itemData.iconFile)
+		
 		entryData:InitializeInventoryVisualData(itemData)
 
 		if itemData.bagId == BAG_WORN then
@@ -937,42 +955,25 @@ ZO_PreHook(GAMEPAD_INVENTORY, "RefreshItemList", function(self)
 		if remaining > 0 and duration > 0 then
 			entryData:SetCooldown(remaining, duration)
 		end
-
+		
 		entryData:SetIgnoreTraitInformation(true)
 
-		entryData.isMap = isItemMap(itemData)
-		
-		if showStolenCategory and itemData.stolen then
-			addToList(itemData, entryData)
-		elseif showJunkCategory and itemData.isJunk then
-			if itemData.stolen then
-				if filterDisabled(itemData) then addToList(itemData, entryData) end
+		if shouldAddItem[listCategory](itemData) then
+			if itemData.bestItemCategoryName ~= lastBestItemCategoryName then
+				lastBestItemCategoryName = itemData.bestItemCategoryName
+
+				entryData:SetHeader(lastBestItemCategoryName)
+				self.itemList:AddEntry("ZO_GamepadItemSubEntryTemplateWithHeader", entryData)
 			else
-				addToList(itemData, entryData)
-			end
-		elseif showMapCategory and entryData.isMap then
-			if itemData.isJunk then
-				if filterDisabled(itemData) then addToList(itemData, entryData) end
-			else
-				addToList(itemData, entryData)
-			end
-		elseif showBoPCategory and itemData.isBoPTradeable then
-			if itemData.isJunk then
-				if filterDisabled(itemData) then addToList(itemData, entryData) end
-			else
-				addToList(itemData, entryData)
-			end
-		else
-			if itemData.isJunk or itemData.stolen or entryData.isMap or itemData.isBoPTradeable then
-				if filterDisabled(itemData) then addToList(itemData, entryData) end
-			else
-				addToList(itemData, entryData)
+				self.itemList:AddEntry("ZO_GamepadItemSubEntryTemplate", entryData)
 			end
 		end
 	end
+
 	self.itemList:Commit()
-	self:RefreshKeybinds()
-	self:RefreshItemActions()
+
+	--	self:RefreshKeybinds()
+	--	self:RefreshItemActions()
 	return true
 end)
 ]]
