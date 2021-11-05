@@ -1,8 +1,8 @@
 ## Title: |cFF00FFIsJusta|r Gamepad Inventory Update
 ## Description: Adds improvements to the default gamepad inventory.
-## APIVersion: 100035 101031
+## APIVersion: 101032
 ## Author: |cFF00FFIsJustaGhost|r
-## Version: 2.2.1
+## Version: 2.4
 ## SavedVariables: IJA_GPInventory_SavedVars
 ## DependsOn: LibCustomMenu>=692
 ## OptionalDependsOn: LibFilters-3.0
@@ -10,14 +10,6 @@
 lang/en.lua
 IsJustaGamepadInventory.lua
 IsJustaGamepadInventory.xml
-
-settings.lua
-junkSort.lua
-itemActions.lua
-
-inventoryLists.lua
-
-
 
 ; This Add-on is not created by, affiliated with or sponsored by ZeniMax
 ; Media Inc. or its affiliates. The Elder Scrolls® and related logos are
